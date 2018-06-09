@@ -1,0 +1,326 @@
+# High-School-Students-Grades
+
+library(glmnet)  ###GLMS - Ridge and Lasso regression
+library(randomForest)
+library(gbm)
+library(e1071)
+library(caret)
+
+###Read data into train and test####
+set.seed(8)
+attach(train_mid) 
+attach(test_mid)
+
+
+names(train_mid)
+######Matrix creation######
+x<-model.matrix(nature~.,data=train_mid)[,-1]
+y<-train_mid$nature
+
+###ridge regression
+ridge.fit<-glmnet(x,y,alpha=0)  #standardizes variables
+
+set.seed(8)
+
+testM = model.matrix(nature~., data = test_mid)[,-1]
+
+y.testM= test_mid$nature
+
+######optimal lambda#######
+set.seed(8)
+
+cv.out=cv.glmnet(x,y,alpha=0)
+
+plot(cv.out)
+bestlam=cv.out$lambda.min
+ridge.train=glmnet(x,y,alpha=0)
+ridge.pred=predict(ridge.train,s=bestlam,newx = testM) 
+
+ridge.pred=ifelse(ridge.pred>.5,1,0)
+mean(ridge.pred != y.testM)
+
+
+table(y.testM, ridge.pred)
+
+####LASSO###
+
+###create X and Y variables#### for train
+x<-model.matrix(nature~.,data=train_mid)[,-1]
+y<-train_mid$nature
+
+########Testing#######
+testM = model.matrix(nature~., data = test_mid)[,-1]
+
+y.testM= test_mid$nature
+
+###LASSO
+lasso.fit<-glmnet(x,y,alpha=1)  #standardizes variables
+
+####plot###
+plot(lasso.fit)
+
+#############################optimal lambda###############
+set.seed(8)
+
+cv.out=cv.glmnet(x,y,alpha=1)
+
+plot(cv.out)
+bestlam=cv.out$lambda.min
+
+lasso.train<-glmnet(x,y,alpha=1)
+lasso.pred=predict(lasso.train,s=bestlam,newx= testM)
+
+lasso.pred=ifelse(lasso.pred>.5,1,0) 
+
+mean(lasso.pred != y.testM)
+
+###############use full data sets########
+lasso.full=glmnet(x,y,alpha=1)
+predict(lasso.full,type="coefficients",s=bestlam)
+
+table(y.testM, lasso.pred)
+
+#############LOGISTIC###################
+
+###create X and Y variables#### for train
+x<-model.matrix(nature~.,data=train_mid)[,-1]
+y<-test_mid$nature
+
+########Testing#######
+testM = model.matrix(nature~., data = test_mid)[,-1]
+
+y.testM= test_mid$nature
+y.testL = rep("B", nrow(test_mid))
+y.testL[y.testM ==1]= "M"
+
+log.fit=glm(nature~.,data= train_mid)
+log.prob=predict(log.fit,newdata = test_mid,type="response")
+log.pred=rep("B",nrow(test_mid))
+log.pred[log.prob>.2]="M"
+
+mean(y.testL!=log.pred)
+table(y.testL, log.pred) 
+
+
+
+#######RandomForest############
+
+###creat X and Y variables
+x<-model.matrix(nature~.,data=train_mid)[,-1] 
+set.seed(8)
+
+
+x.train=model.matrix(nature~.,data=train_mid)[,-1] 
+y.train=train_mid$nature
+
+
+x.test=model.matrix(nature~.,data=test_mid)[,-1] 
+y.test=test_mid$nature
+
+y.testNew=rep("B",nrow(test_mid))
+y.testNew[y.test==1]="M"
+
+
+mean(rf.pred != y.test)
+table(y.testNew, rf.pred)
+importance(rf.fit)      
+
+varImpPlot(rf.fit, sort=TRUE)
+
+
+
+rf.fit=randomForest(as.factor(nature)~.,data= train_mid, ntree = 1000, importance= TRUE)
+rf.pred=predict(rf.fit,newdata= test_mid)
+
+##tuning for best n.trees##
+set.seed(2345)
+m<-seq(from=500,to=10000,by=500)
+out<-vector("list", length(m))
+for(i in m ) {
+  fit<-randomForest(as.factor(nature)~.,data=train_mid,mtry=6,n.trees=i,importance =TRUE)
+  pred<-predict(fit,newdata=test_mid)
+  out[[i]]<-mean(pred==y.testNew) 
+}
+best<-unlist(out)
+mtable<-data.frame(m,best)
+best.ntree<-min(subset(mtable,best==max(best))$m)
+best.ntree
+
+##tuning for best mtry##
+set.seed(2345)
+m<-seq(from=1,to=12,by=1)  
+out<-vector("list", length(m))
+for(i in m ) {
+  fit<-randomForest(as.factor(nature)~.,data=train_mid,mtry=i,n.trees=best.ntree,importance =TRUE)
+  pred<-predict(fit,newdata=test_mid)
+  out[[i]]<-mean(pred==y.testNew) 
+}
+best<-unlist(out)
+mtable<-data.frame(m,best)
+best.mtry<-min(subset(mtable,best==max(best))$m)
+best.mtry
+
+###use tuned paramters for prediction###
+rf.fit<-randomForest(as.factor(nature)~.,data=train_mid,mtry=best.mtry,n.trees=best.ntree,importance =TRUE)
+importance(rf.fit)
+
+varImpPlot(rf.fit,sort=T)
+pred.rf<-predict(rf.fit,newdata=x.test)
+#pred.rf=ifelse(pred.rf>0.5,1.0)
+#table(rf.pred,y.test)
+confusionMatrix(pred.rf,y.test,"1")
+
+
+
+
+########Top 10 most important: x203, x207, x218, x209, x64, x8, x63, x16, x15, x6 ########
+#####Remove Top 10#######
+
+rf.fitRem = randomForest(as.factor(nature)~. -x203 -x207 -x218 -x209 -x64 -x8 -x63 -x16 -x15 -x6
+                   , data= train_mid, importance= TRUE)
+
+rf.predRem=predict(rf.fitRem,newdata= test_mid)
+
+mean(rf.predRem != y.test)
+table(y.testNew, rf.predRem)
+importance(rf.fitRem)
+
+varImpPlot(rf.fitRem, sort = TRUE)
+
+
+
+
+#########Boosting#############
+
+x<-model.matrix(nature~.,data=train_mid)[,-1] 
+set.seed(8)
+
+
+x.train=model.matrix(nature~.,data=train_mid)[,-1] 
+y.train=train_mid$nature
+
+
+x.test=model.matrix(nature~.,data=test_mid)[,-1] 
+y.test=test_mid$nature
+
+
+######tune n.trees#######
+m = seq(from=500,to=10000,by=500)
+out = vector("list", length(m))
+for(i in m ) {
+  fit= gbm(nature~.,data=train_mid,distribution = "adaboost",n.trees=i, interaction.depth = 4)
+  boost= predict(fit,newdata=test_mid,n.trees=i,type="response")
+  pred=ifelse(boost>.5,1,0)
+  out[[i]] = mean(pred==y.test) 
+}
+best<-unlist(out)
+mtable<-data.frame(m,best)
+best.ntrees<-min(subset(mtable,best==max(best))$m)
+best.ntrees
+
+##tuning for best interaction.depth##
+set.seed(2345)
+m = seq(from=1,to=10,by=1)
+out<-vector("list", length(m))
+for(i in m ) {
+  fit = gbm(nature~.,data=train_mid,distribution = "adaboost",n.trees=best.ntrees, interaction.depth = i)
+  boost = predict(fit,newdata=test_mid,n.trees=bestTrees,type="response")
+  pred=ifelse(boost>.5,1,0)
+  out[[i]]<-mean(pred==y.validation) 
+}
+best<-unlist(out)
+mtable<-data.frame(m,best)
+best.int.depth<-min(subset(mtable,best==max(best))$m)
+best.int.depth
+
+
+
+
+y.testNew = ifelse (y.test> 0.5, "M", "B")
+
+boost.fit=gbm(nature~.,data= train_mid, distribution = "adaboost", n.trees =5000, interaction.depth = 4, cv.folds = 10)
+boost.pred=predict(boost.fit,newdata= test_mid, n.trees = 5000, type ="response")
+
+############ Selection of optimal number of trees#################
+best.iter = gbm.perf(boost.fit, method = "cv")
+print(best.iter)
+
+
+boost.pred = ifelse(boost.pred > .5, "M", "B")
+
+mean(boost.pred != y.testNew)
+table(boost.pred, y.testNew)
+
+summary(boost.fit)
+
+
+
+####Top 10 most important: x203, x207, x218, x209, x8, x16, x219, x64, x63, x44#############
+#####Remove top 10###########
+
+boost.fitRem = gbm(nature~. -x203 -x207 -x218 -x209 -x8 -x16 -x219 -x64 -x63 -x44
+                , data= train_mid, distribution = "adaboost", n.trees = 5000, interaction.depth = 4, cv.folds =10)
+
+boost.predRem=predict(boost.fitRem,newdata= test_mid, n.trees = 5000, type ="response")
+
+boost.predRem = ifelse(boost.predRem >.5, "M", "B")
+
+mean(boost.predRem != y.testNew)
+table(y.testNew, boost.predRem)
+summary(boost.fitRem)
+
+
+
+#############SVM####################
+###creat X and Y variables
+x<-model.matrix(nature~.,data=train_mid)[,-1] 
+set.seed(8)
+
+
+x.train=model.matrix(nature~.,data=train_mid)[,-1] 
+y.train=train_mid$nature
+
+
+x.test=model.matrix(nature~.,data=test_mid)[,-1] 
+y.test=test_mid$nature
+
+y.testNew= test_mid$nature
+y.testNew = ifelse(y.testNew ==0, "B", "M")
+
+
+#####Classification SVM LINEAR#######
+svmlinear.fit = svm(as.factor(nature)~.,data= train_mid,kernel ="linear")
+summary(svmlinear.fit)
+
+####prediction############
+pred.svmlinear = predict(svmlinear.fit,newdata=test_mid)
+pred.svmlinear = ifelse(pred.svmlinear==0,"B","M")
+mean(pred.svmlinear!=y.testNew)
+
+table(y.testNew, pred.svmlinear)
+
+
+######### Using Radial Kernel##########
+
+svmRadial.fit = svm(as.factor(nature)~.,data= train_mid,kernel ="radial")
+summary(svmlinear.fit)
+
+
+pred.svmRadial = predict(svmRadial.fit,newdata=test_mid)
+pred.svmRadial = ifelse(pred.svmRadial==0,"B","M")
+mean(pred.svmRadial!=y.testNew)
+
+table(pred.svmRadial,y.testNew)
+
+tune.Radial=tune(svm, as.factor(nature)~. ,data= train_mid, kernel ="radial",  ranges =list(cost=c(0.001 , 0.01, 0.1, 1,5,10,100)))
+summary (tune.Radial)
+
+optimal = tune.Radial$best.model
+
+####prediction############
+
+pred.svmRadial = predict(optimal,newdata=test_mid)
+pred.svmRadial = ifelse(pred.svmRadial==0,"B","M")
+mean(pred.svmRadial!=y.testNew)
+
+table(pred.svmRadial,y.testNew)
